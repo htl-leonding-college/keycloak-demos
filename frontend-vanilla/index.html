@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keycloak-Demo · HTL Leonding</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.classless.min.css">
+<style>
+  pre { background: var(--pico-code-background-color); padding: 1rem; overflow-x: auto; font-size: .8rem; }
+  .zeile { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+  .marke { font-size: .75rem; padding: .15rem .5rem; border-radius: 1rem; background: var(--pico-secondary-background); color: var(--pico-secondary-inverse); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Keycloak-Demo</h1>
+<p>Anmeldung am Schul-Keycloak über Authorization Code Flow mit PKCE —
+   ohne Bibliothek, damit sichtbar bleibt, was passiert.</p>
+
+<article id="stand">
+  <p><strong>Status:</strong> <span id="status">nicht angemeldet</span></p>
+  <div class="zeile">
+    <button id="anmelden">Anmelden</button>
+    <button id="abmelden" class="secondary" disabled>Abmelden</button>
+  </div>
+</article>
+
+<article>
+  <header><strong>Stufe 2 — was im Token steht</strong></header>
+  <p>Das Token ist nur Base64, nicht verschlüsselt. Jeder, der es hat, kann es lesen.
+     Genau deshalb steht nichts Geheimes drin und genau deshalb ist die
+     <em>Signatur</em> das, was zählt.</p>
+  <pre id="claims">— noch nicht angemeldet —</pre>
+</article>
+
+<article>
+  <header><strong>Stufe 3 &amp; 4 — Aufrufe ans Backend</strong></header>
+  <div class="zeile">
+    <button class="secondary" data-ruf="/api/oeffentlich">öffentlich</button>
+    <button class="secondary" data-ruf="/api/geschuetzt">geschützt</button>
+    <button class="secondary" data-ruf="/api/meine-klasse">meine Klasse</button>
+    <button class="secondary" data-ruf="/api/nur-lehrer">nur Lehrer</button>
+  </div>
+  <pre id="antwort">— noch kein Aufruf —</pre>
+</article>
+
+<script type="module">
+// ===========================================================================
+// Konfiguration
+// ===========================================================================
+const KEYCLOAK = 'https://auth-dev.htl-leonding.ac.at/realms/htl-leonding';
+const CLIENT   = 'demo-frontend';
+const BACKEND  = 'http://localhost:8080';
+// Muss EXAKT einem Eintrag in der Redirect-URI-Liste des Clients entsprechen.
+// Kein Schrägstrich zu viel, kein Port daneben - Keycloak vergleicht als Text.
+const ZIEL     = window.location.origin + window.location.pathname;
+
+// ===========================================================================
+// PKCE von Hand. Rund dreissig Zeilen - das ist der ganze Zauber.
+//
+// Das Problem, das PKCE loest: Ein oeffentlicher Client kann kein Geheimnis
+// aufbewahren (der Quelltext liegt im Browser). Wer den Autorisierungscode
+// abfaengt, koennte ihn also einloesen. Mit PKCE wird beim Start ein
+// Zufallswert erzeugt, dessen HASH mitgeschickt wird; eingeloest wird der
+// Code nur gegen den Zufallswert selbst. Der Abfangende hat den Hash und
+// kann ihn nicht umkehren.
+// ===========================================================================
+
+function zufall(laenge = 64) {
+  const bytes = crypto.getRandomValues(new Uint8Array(laenge));
+  return base64url(bytes);
+}
+
+function base64url(bytes) {
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function s256(text) {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return base64url(new Uint8Array(hash));
+}
+
+async function anmelden() {
+  const verifier = zufall();
+  const state    = zufall(16);
+  // Der Verifier muss den Seitenwechsel ueberleben - er wird erst NACH der
+  // Rueckkehr gebraucht. sessionStorage und nicht localStorage: Er soll mit
+  // dem Tab verschwinden.
+  sessionStorage.setItem('pkce_verifier', verifier);
+  sessionStorage.setItem('pkce_state', state);
+
+  const p = new URLSearchParams({
+    client_id: CLIENT,
+    redirect_uri: ZIEL,
+    response_type: 'code',          // NICHT 'token' - Implicit ist serverseitig verboten
+    scope: 'openid profile email',
+    state,
+    code_challenge: await s256(verifier),
+    code_challenge_method: 'S256'   // NICHT 'plain' - die Client Policy lehnt es ab
+  });
+  window.location.href = `${KEYCLOAK}/protocol/openid-connect/auth?${p}`;
+}
+
+async function codeEinloesen(code) {
+  const verifier = sessionStorage.getItem('pkce_verifier');
+  const antwort = await fetch(`${KEYCLOAK}/protocol/openid-connect/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: CLIENT,
+      redirect_uri: ZIEL,
+      code,
+      code_verifier: verifier      // hier zahlt sich PKCE aus
+    })
+  });
+  if (!antwort.ok) throw new Error(`Token-Endpunkt: ${antwort.status} ${await antwort.text()}`);
+  return antwort.json();
+}
+
+// ===========================================================================
+// Ablauf
+// ===========================================================================
+const $ = (id) => document.getElementById(id);
+let tokens = null;
+
+function anzeigen() {
+  const an = !!tokens;
+  $('status').textContent = an
+    ? `angemeldet als ${nutzlast(tokens.access_token).preferred_username}`
+    : 'nicht angemeldet';
+  $('anmelden').disabled = an;
+  $('abmelden').disabled = !an;
+  $('claims').textContent = an
+    ? JSON.stringify(nutzlast(tokens.access_token), null, 2)
+    : '— noch nicht angemeldet —';
+}
+
+/** Mittelteil des JWT dekodieren. Das ist KEINE Pruefung - die macht das Backend. */
+function nutzlast(jwt) {
+  const teil = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+  return JSON.parse(decodeURIComponent(escape(atob(teil))));
+}
+
+async function rufen(pfad) {
+  $('antwort').textContent = '…';
+  try {
+    const antwort = await fetch(BACKEND + pfad, {
+      headers: tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {}
+    });
+    const text = await antwort.text();
+    let koerper;
+    try { koerper = JSON.stringify(JSON.parse(text), null, 2); } catch { koerper = text || '(leer)'; }
+    // Der Statuscode gehoert sichtbar dazu: 401 heisst "kein gueltiges Token",
+    // 403 heisst "gueltiges Token, aber die Rolle fehlt". Zwei ganz
+    // verschiedene Fehler, die ohne diese Anzeige gleich aussehen.
+    $('antwort').textContent = `HTTP ${antwort.status}\n\n${koerper}`;
+  } catch (e) {
+    $('antwort').textContent =
+      `Aufruf fehlgeschlagen: ${e.message}\n\n` +
+      `Laeuft das Backend auf ${BACKEND}?  (quarkus dev)\n` +
+      `Steht in der Browser-Konsole etwas von CORS, fehlt die Herkunft\n` +
+      `${window.location.origin} in quarkus.http.cors.origins.`;
+  }
+}
+
+$('anmelden').onclick = anmelden;
+$('abmelden').onclick = () => {
+  const idToken = tokens?.id_token;
+  tokens = null;
+  sessionStorage.clear();
+  anzeigen();
+  // Abmelden heisst auch: die Sitzung IM KEYCLOAK beenden. Wer nur lokal
+  // vergisst, ist beim naechsten Anmelden ohne Eingabe wieder drin - und
+  // haelt das faelschlich fuer einen Fehler.
+  window.location.href = `${KEYCLOAK}/protocol/openid-connect/logout`
+    + `?post_logout_redirect_uri=${encodeURIComponent(ZIEL)}`
+    + (idToken ? `&id_token_hint=${idToken}` : '');
+};
+document.querySelectorAll('[data-ruf]').forEach(b =>
+  b.onclick = () => rufen(b.dataset.ruf));
+
+// Rueckkehr von Keycloak?
+const p = new URLSearchParams(window.location.search);
+if (p.get('error')) {
+  $('antwort').textContent = `Keycloak hat abgelehnt: ${p.get('error')}\n${p.get('error_description') || ''}`;
+  history.replaceState({}, '', ZIEL);
+} else if (p.get('code')) {
+  if (p.get('state') !== sessionStorage.getItem('pkce_state')) {
+    // Schutz gegen untergeschobene Antworten. Ohne diese Pruefung koennte
+    // jemand den Nutzer mit einem fremden Code auf diese Seite schicken.
+    $('antwort').textContent = 'state stimmt nicht — Antwort verworfen.';
+  } else {
+    try {
+      tokens = await codeEinloesen(p.get('code'));
+    } catch (e) {
+      $('antwort').textContent = e.message;
+    }
+  }
+  history.replaceState({}, '', ZIEL);
+}
+anzeigen();
+</script>
+
+</main>
+</body>
+</html>
