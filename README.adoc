@@ -32,6 +32,17 @@ cd frontend-vanilla && python3 -m http.server 8000
 
 Dann `http://localhost:8000` öffnen und auf *Anmelden* klicken.
 
+Für Stufe 5 braucht das Backend zusätzlich das Secret seines Dienstkontos:
+
+[source,bash]
+----
+# in backend-quarkus/.env — per .gitignore ausgeschlossen
+KC_DEMO_BACKEND_SECRET=$(security find-generic-password -a demo-backend -s kc-htl-leonding-demo-backend -w)
+----
+
+Ohne die Variable laufen die Stufen 1–4 unverändert; nur `/api/groups` meldet
+dann `502` mit dem Hinweis, dass das Dienstkonto sich nicht anmelden konnte.
+
 IMPORTANT: Der Port ist nicht beliebig. `8000`, `4200` und `5173` sind die
 Weiterleitungsziele, die am Client `demo-frontend` eingetragen sind. Keycloak
 vergleicht sie als Text — ein anderer Port ergibt `Invalid parameter: redirect_uri`.
@@ -59,8 +70,8 @@ vergleicht sie als Text — ein anderer Port ergibt `Invalid parameter: redirect
 |`/api/my-class`, `/api/teachers-only`
 
 |5
-|Benutzerliste einer Klasse — *noch nicht enthalten*
-|fällt in Change 3 (FGAP)
+|Gruppen auflisten, Mitglieder einer Gruppe anzeigen — über ein *Dienstkonto*
+|`/api/groups`, `/api/groups/{id}/members`
 |===
 
 == Was hier zu lernen ist
@@ -95,36 +106,61 @@ der Server ab — nicht der Client. Die Client Policies des Realms machen beides
 serverseitig unmöglich. Ausprobieren lohnt sich: Die Fehlermeldung kommt von
 Keycloak.
 
+=== Rollen kommen nicht aus `groups`
+
+Die Zeile, die eine Stunde gekostet hat:
+
+[source,properties]
+----
+quarkus.oidc.roles.role-claim-path=realm_access/roles
+----
+
+Ohne sie sucht Quarkus die Rollen zuerst im `groups`-Claim und hört auf, sobald
+der nicht leer ist. In diesem Realm steht dort die *Klasse*. `@RolesAllowed("teacher")`
+antwortet dann mit `403`, obwohl die Rolle im Token steht.
+
+Tückisch daran ist die Zeitfolge: Vor der Einführung der Klassengruppen hätte
+derselbe Code funktioniert.
+
+=== Stufe 5 ist die einzige Stufe mit einem Geheimnis
+
+Klasse und Rolle der *angemeldeten* Person stehen im Token — dafür ist kein
+einziger Aufruf beim Server nötig. Erst wer etwas über Personen wissen muss, die
+gerade *nicht* angemeldet sind, braucht ein Dienstkonto.
+
+An dessen Secret hängt die Sicht auf alle Konten des Realms. Deshalb bekommt es
+nicht jedes Projekt, sondern nur benannte — siehe D36 im Infrastruktur-Repo.
+
 == Stand
 
-Was *geprüft* ist (2026-08-22, gegen den laufenden Server):
+Was *geprüft* ist (2026-08-22, gegen den laufenden Server, im Browser):
 
 [source,text]
 ----
-/api/public          ohne Token           200
-/api/protected           ohne Token           401
-/api/protected           mit Unsinn-Token     401
-/api/my-class         ohne Token           401
-/api/teachers-only           ohne Token           401
-CORS-Vorabfrage von http://localhost:8000      200, allow-origin gesetzt
-OIDC-Discovery + JWKS von auth-dev             gelingt
+/api/public          ohne Token                 200
+/api/protected       ohne Token / Unsinn-Token  401
+/api/protected       als Lehrkraft              200, roles [teacher, ...], groups [/staff/teachers]
+/api/my-class        als demo.tester            200, class "", Hinweis statt Fehler
+/api/teachers-only   als Lehrkraft              200
+/api/teachers-only   als demo.tester            403
+CORS-Vorabfrage von http://localhost:8000       200, allow-origin gesetzt
 ----
 
-Was *noch nicht* geht, und warum:
+Die beiden Zeilen zu `/api/teachers-only` gehören zusammen: Erst `200` **und**
+`403` zusammen belegen, dass die Rolle trennt statt durchzuwinken.
 
-* *`/api/my-class` liefert „keine Klassengruppe"* — solange der Client Scope
-  `classes` nicht im Realm eingetragen ist. Er ist gebaut (Change 2, Task 7.8),
-  aber noch nicht ausgerollt (Task 7.11).
-* *`/api/teachers-only` liefert 403* — die Realm-Rolle `teacher` existiert noch nicht
-  und ist niemandem zugewiesen.
-* *Der Anmeldevorgang selbst ist nicht durchgespielt.* Er braucht einen Browser
-  und ein echtes Schulkonto.
+Was *noch nicht* geprüft ist:
+
+* *Stufe 5 gegen den Server* — Dienstkonto und `view-users` müssen dafür am
+  Client `demo-backend` eingerichtet sein.
+* *Das Angular-Frontend* ist nicht gebaut.
 
 == Aufbau
 
 [source,text]
 ----
-backend-quarkus/    Quarkus 3.38.3, Java 25 — prüft Tokens, meldet sich nie selbst an
+backend-quarkus/    Quarkus 3.38.3, Java 25 — prüft Tokens; meldet sich nur für
+                    Stufe 5 selbst an, und dann als Dienstkonto
 frontend-vanilla/   eine HTML-Datei, kein Build, PKCE von Hand
 ----
 

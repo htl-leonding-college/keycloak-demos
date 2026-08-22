@@ -45,6 +45,19 @@
   <pre id="antwort">— noch kein Aufruf —</pre>
 </article>
 
+<article>
+  <header><strong>Stufe 5 — Mitglieder einer Gruppe</strong></header>
+  <p>Die erste Stufe, die ein <em>Dienstkonto</em> braucht: Hier geht es um Personen, die
+     gerade <strong>nicht</strong> angemeldet sind. Klasse und Rolle der angemeldeten
+     Person stehen im Token — dafür ist kein einziger Aufruf nötig.</p>
+  <div class="zeile">
+    <button id="gruppen-laden" class="secondary">Gruppen laden</button>
+    <select id="gruppe" disabled><option>— noch nicht geladen —</option></select>
+  </div>
+  <p id="gruppen-zahl"></p>
+  <div id="mitglieder"></div>
+</article>
+
 <script type="module">
 // ===========================================================================
 // Konfiguration
@@ -165,6 +178,74 @@ async function rufen(pfad) {
       `${window.location.origin} in quarkus.http.cors.origins.`;
   }
 }
+
+// ===========================================================================
+// Stufe 5 - Gruppen und ihre Mitglieder
+// ===========================================================================
+
+/** Aufruf ans Backend, der JSON zurueckgibt oder wirft. */
+async function holen(pfad) {
+  const antwort = await fetch(BACKEND + pfad, {
+    headers: tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {}
+  });
+  const text = await antwort.text();
+  let koerper = null;
+  try { koerper = JSON.parse(text); } catch { /* kein JSON */ }
+  if (!antwort.ok) {
+    // 403 heisst hier: angemeldet, aber keine Lehrkraft. Der Hinweis aus dem
+    // Backend nennt bei 502 zusaetzlich das fehlende Recht des Dienstkontos.
+    throw new Error(koerper?.hint || koerper?.error || `HTTP ${antwort.status}`);
+  }
+  return koerper;
+}
+
+$('gruppen-laden').onclick = async () => {
+  const auswahl = $('gruppe');
+  $('gruppen-zahl').textContent = 'lädt …';
+  $('mitglieder').innerHTML = '';
+  try {
+    const gruppen = await holen('/api/groups');
+    auswahl.innerHTML = '';
+    for (const g of gruppen) {
+      const o = document.createElement('option');
+      o.value = g.id;
+      // Einrueckung nach Ebene macht den Baum im flachen Auswahlfeld sichtbar.
+      o.textContent = '\u00a0'.repeat(g.level * 4) + g.name + (g.leaf ? '' : '/');
+      // Ordner haben keine Mitglieder - /classes und /classes/IF sind welche.
+      o.disabled = !g.leaf;
+      auswahl.appendChild(o);
+    }
+    auswahl.disabled = false;
+    $('gruppen-zahl').textContent =
+      `${gruppen.length} Gruppen, davon ${gruppen.filter(g => g.leaf).length} mit Mitgliedern.`;
+  } catch (e) {
+    $('gruppen-zahl').textContent = e.message;
+  }
+};
+
+$('gruppe').onchange = async (ereignis) => {
+  const ziel = $('mitglieder');
+  ziel.innerHTML = '<p>lädt …</p>';
+  try {
+    const d = await holen(`/api/groups/${ereignis.target.value}/members`);
+    if (d.count === 0) { ziel.innerHTML = '<p>Diese Gruppe hat keine Mitglieder.</p>'; return; }
+    const zeilen = d.members.map(m => `
+      <tr${m.enabled ? '' : ' style="opacity:.5"'}>
+        <td>${m.username ?? ''}</td>
+        <td>${(m.lastName ?? '') + ' ' + (m.firstName ?? '')}</td>
+        <td>${m.email ?? ''}</td>
+        <td>${m.enabled ? 'aktiv' : 'deaktiviert'}</td>
+      </tr>`).join('');
+    ziel.innerHTML = `
+      <p><strong>${d.count}</strong> Mitglieder — ${d.active} aktiv, ${d.disabled} deaktiviert.</p>
+      <table>
+        <thead><tr><th>Benutzername</th><th>Name</th><th>E-Mail</th><th>Status</th></tr></thead>
+        <tbody>${zeilen}</tbody>
+      </table>`;
+  } catch (e) {
+    ziel.innerHTML = `<p>${e.message}</p>`;
+  }
+};
 
 $('anmelden').onclick = anmelden;
 $('abmelden').onclick = () => {
