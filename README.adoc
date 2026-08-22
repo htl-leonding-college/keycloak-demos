@@ -149,6 +149,26 @@ stellt sich seine Berechtigung selbst aus. Der Aufrufer nennt nur die ID.
 Verglichen wird gegen den `groups`-Claim des Tokens — er ist signiert. Ein
 zweiter Aufruf beim Server ergäbe denselben Wert, nur langsamer.
 
+=== Erneuerung ist der Teil, den Bibliotheken verstecken
+
+Fünf Minuten Tokenlebensdauer heißt: Jede Anwendung braucht Erneuerung, nicht nur
+langlaufende. Im Vanilla-Frontend steht sie offen da — rund dreißig Zeilen:
+
+* *Vor* dem Aufruf prüfen, nicht nach einem `401` wiederholen. Ein
+  Wiederholungsversuch verdoppelt alles, was der erste Aufruf schon ausgeführt
+  hat, bevor er am Token scheiterte.
+* Dreißig Sekunden Vorlauf, damit ein Token nicht *während* des Netzwegs abläuft.
+  Dieser Fehler ist sonst nicht reproduzierbar.
+* Ein laufender Tausch wird geteilt, nicht wiederholt. Ohne diese Sperre starten
+  drei gleichzeitige Aufrufe drei Erneuerungen mit demselben `refresh_token` —
+  und sobald der Realm Refresh-Token-Rotation einschaltet, entwertet der erste
+  Tausch die anderen beiden. Der Fehler tritt dann erst unter Last auf und sieht
+  aus wie ein Serverproblem.
+
+NOTE: Das `refresh_token` ist kein Client-Geheimnis. Der Tausch geht ohne
+`client_secret` — der Client ist öffentlich, und die Bindung stellt Keycloak über
+`client_id` her.
+
 === Stufe 5 ist die einzige Stufe mit einem Geheimnis
 
 Klasse und Rolle der *angemeldeten* Person stehen im Token — dafür ist kein
@@ -186,10 +206,11 @@ Was *noch nicht* geprüft ist:
   und die kommt am ersten Zweig vorbei.
 * *Das Angular-Frontend* ist nicht gebaut.
 
-CAUTION: Das Token läuft nach *fünf Minuten* ab (`accessTokenLifespan=300`), und
-das Vanilla-Frontend erneuert es nicht — es hebt das `refresh_token` auf, benutzt
-es aber nirgends. Wer anmeldet, erklärt und dann klickt, bekommt `401`. Bis das
-nachgerüstet ist: neu anmelden.
+Das Token läuft nach *fünf Minuten* ab (`accessTokenLifespan=300`). Das Frontend
+erneuert es seit dem 2026-08-23 selbst — die Statuszeile zeigt die Restlaufzeit
+mit, und beim nächsten Aufruf nach Ablauf wird still getauscht. Nach *dreißig
+Minuten* ohne Aktivität endet die Sitzung im Keycloak; dann hilft nur neu
+anmelden, und die Demo sagt das auch.
 
 == Aufbau
 

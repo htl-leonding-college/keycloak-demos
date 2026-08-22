@@ -139,6 +139,71 @@ async function codeEinloesen(code) {
 }
 
 // ===========================================================================
+// Erneuerung - der Teil, den keycloak-js unsichtbar erledigt
+//
+// Das Access-Token dieses Realms lebt FUENF MINUTEN. Ohne Erneuerung faellt
+// jede Anwendung danach in 401 - mitten im Betrieb, ohne dass der Benutzer
+// etwas falsch gemacht haette.
+//
+// Das refresh_token lebt laenger (SSO-Leerlauf, hier 30 Minuten) und wird
+// gegen ein frisches Paar getauscht. Es ist KEIN Geheimnis des Clients: Der
+// Client ist oeffentlich, deshalb geht der Tausch ohne client_secret - die
+// Bindung an diesen Client stellt Keycloak ueber client_id und die Herkunft
+// des Tokens her.
+// ===========================================================================
+
+/** Sekunden bis zum Ablauf des Access-Tokens. Negativ heisst: schon abgelaufen. */
+function restlaufzeit() {
+  if (!tokens) return 0;
+  return Math.round(nutzlast(tokens.access_token).exp - Date.now() / 1000);
+}
+
+// Ein laufender Tausch wird GETEILT, nicht wiederholt. Ohne diese Sperre
+// starten drei gleichzeitige Aufrufe drei Erneuerungen mit demselben
+// refresh_token - und sobald der Realm Refresh-Token-Rotation einschaltet,
+// entwertet der erste Tausch die beiden anderen. Der Fehler zeigt sich dann
+// erst unter Last und sieht aus wie ein Serverproblem.
+let laufenderTausch = null;
+
+async function erneuern() {
+  const antwort = await fetch(`${KEYCLOAK}/protocol/openid-connect/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: CLIENT,
+      refresh_token: tokens.refresh_token
+    })
+  });
+  if (!antwort.ok) {
+    // Der haeufigste Grund ist kein Fehler, sondern Zeitablauf: Nach 30
+    // Minuten ohne Aktivitaet ist die Sitzung im Keycloak beendet.
+    tokens = null;
+    sessionStorage.clear();
+    anzeigen();
+    throw new Error('Die Sitzung ist abgelaufen. Bitte neu anmelden.');
+  }
+  tokens = await antwort.json();
+  anzeigen();
+  return tokens.access_token;
+}
+
+/**
+ * Das Token fuer den naechsten Aufruf - erneuert, falls es demnaechst ablaeuft.
+ *
+ * Die dreissig Sekunden Vorlauf sind kein Sicherheitsabstand aus Vorsicht: Ein
+ * Token, das waehrend des Netzwegs abläuft, wird vom Server abgelehnt, obwohl
+ * es beim Absenden gueltig war. Genau dieser Fehler ist nicht reproduzierbar.
+ */
+async function tokenFuerAufruf() {
+  if (!tokens) return null;
+  if (restlaufzeit() > 30) return tokens.access_token;
+  if (!tokens.refresh_token) throw new Error('Kein refresh_token vorhanden — bitte neu anmelden.');
+  laufenderTausch = laufenderTausch || erneuern().finally(() => { laufenderTausch = null; });
+  return laufenderTausch;
+}
+
+// ===========================================================================
 // Ablauf
 // ===========================================================================
 const $ = (id) => document.getElementById(id);
@@ -148,6 +213,7 @@ function anzeigen() {
   const an = !!tokens;
   $('status').textContent = an
     ? `angemeldet als ${nutzlast(tokens.access_token).preferred_username}`
+      + ` — Token noch ${restlaufzeit()} s gültig`
     : 'nicht angemeldet';
   $('anmelden').disabled = an;
   $('abmelden').disabled = !an;
@@ -165,8 +231,12 @@ function nutzlast(jwt) {
 async function rufen(pfad) {
   $('antwort').textContent = '…';
   try {
+    // Absichtlich VOR dem Aufruf und nicht als Wiederholung nach einem 401:
+    // Ein Wiederholungsversuch verdoppelt jede Aktion, die der erste Aufruf
+    // schon ausgefuehrt hat, bevor er am Token scheiterte.
+    const token = await tokenFuerAufruf();
     const antwort = await fetch(BACKEND + pfad, {
-      headers: tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {}
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
     });
     const text = await antwort.text();
     let koerper;
@@ -190,8 +260,9 @@ async function rufen(pfad) {
 
 /** Aufruf ans Backend, der JSON zurueckgibt oder wirft. */
 async function holen(pfad) {
+  const token = await tokenFuerAufruf();
   const antwort = await fetch(BACKEND + pfad, {
-    headers: tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {}
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
   });
   const text = await antwort.text();
   let koerper = null;
@@ -288,6 +359,12 @@ if (p.get('error')) {
   history.replaceState({}, '', ZIEL);
 }
 anzeigen();
+
+// Die Anzeige der Restlaufzeit laeuft mit - sie macht sichtbar, was sonst nur
+// als 401 auffaellt. Sie erneuert NICHT von sich aus: Erneuert wird beim
+// naechsten Aufruf. Ein Hintergrundtimer, der ein Token am Leben haelt, das
+// niemand benutzt, verlaengert nur die Sitzung.
+setInterval(() => { if (tokens) anzeigen(); }, 5000);
 </script>
 
 </main>
