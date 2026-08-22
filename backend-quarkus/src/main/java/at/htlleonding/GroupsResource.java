@@ -70,7 +70,7 @@ public class GroupsResource {
             }
             flach.sort(Comparator.comparing(m -> (String) m.get("path")));
             return Response.ok(flach).build();
-        } catch (ClientWebApplicationException e) {
+        } catch (RuntimeException e) {
             return fehler(e);
         }
     }
@@ -120,7 +120,7 @@ public class GroupsResource {
                     // ohne diese Zahl wird falsch gelesen.
                     "disabled", alle.size() - aktiv,
                     "members", alle)).build();
-        } catch (ClientWebApplicationException e) {
+        } catch (RuntimeException e) {
             return fehler(e);
         }
     }
@@ -177,8 +177,33 @@ public class GroupsResource {
      * beginnt in der eigenen Anwendung - waehrend die Ursache ein fehlendes
      * Recht am Dienstkonto ist.
      */
-    private Response fehler(ClientWebApplicationException e) {
-        int status = e.getResponse().getStatus();
+    private Response fehler(RuntimeException e) {
+        // Zwei ganz verschiedene Fehlerlagen sehen aus der Anwendung heraus
+        // gleich aus, und die Unterscheidung ist die halbe Fehlersuche:
+        //
+        //   1. Das Dienstkonto kommt gar nicht erst an ein Token. Dann wirft
+        //      die OIDC-Erweiterung, BEVOR ein Aufruf abgeht - es gibt keine
+        //      Antwort der Verwaltungsschnittstelle, die man lesen koennte.
+        //   2. Das Token steht, die Verwaltungsschnittstelle lehnt ab.
+        //
+        // Frueher fiel Fall 1 durch und wurde ein 500er. Ein 500er sagt
+        // "Fehler in dieser Anwendung" - und schickt die Suche damit an die
+        // falsche Stelle.
+        if (!(e instanceof ClientWebApplicationException c)) {
+            return Response.status(502)
+                    .entity(Map.of(
+                            "error", "Das Dienstkonto konnte kein Token holen: "
+                                   + e.getClass().getSimpleName(),
+                            "cause", String.valueOf(e.getMessage()),
+                            "hint", "Ist am Client demo-backend der Dienstkonto-Ablauf "
+                                  + "eingeschaltet (projekt-anlegen.sh demo "
+                                  + "--benutzerliste-alle), und steht KC_DEMO_BACKEND_SECRET "
+                                  + "in der Umgebung? Ohne die Variable meldet sich das "
+                                  + "Backend mit dem Platzhalter 'fehlt' an."))
+                    .build();
+        }
+
+        int status = c.getResponse().getStatus();
         String hinweis = switch (status) {
             case 401 -> "Das Dienstkonto konnte sich nicht anmelden. Stimmt das Client Secret "
                       + "in KC_DEMO_BACKEND_SECRET, und ist der Dienstkonto-Ablauf am Client "

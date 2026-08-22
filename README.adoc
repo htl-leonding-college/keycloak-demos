@@ -176,11 +176,20 @@ CORS-Vorabfrage von http://localhost:8000       200, allow-origin gesetzt
 Die beiden Zeilen zu `/api/teachers-only` gehören zusammen: Erst `200` **und**
 `403` zusammen belegen, dass die Rolle trennt statt durchzuwinken.
 
+Stufe 5, gegen den Server gelaufen (2026-08-23): Gruppen laden und Mitglieder
+anzeigen funktionieren mit dem Dienstkonto des Clients `demo-backend`.
+
 Was *noch nicht* geprüft ist:
 
-* *Stufe 5 gegen den Server* — Dienstkonto und `view-users` müssen dafür am
-  Client `demo-backend` eingerichtet sein.
+* *Die Bezugsprüfung aus der Sicht einer Schülerin* — dass eine fremde Klasse
+  `403` liefert und die eigene `200`. Bisher nur aus Lehrkraft-Sicht gesehen,
+  und die kommt am ersten Zweig vorbei.
 * *Das Angular-Frontend* ist nicht gebaut.
+
+CAUTION: Das Token läuft nach *fünf Minuten* ab (`accessTokenLifespan=300`), und
+das Vanilla-Frontend erneuert es nicht — es hebt das `refresh_token` auf, benutzt
+es aber nirgends. Wer anmeldet, erklärt und dann klickt, bekommt `401`. Bis das
+nachgerüstet ist: neu anmelden.
 
 == Aufbau
 
