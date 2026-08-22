@@ -13,19 +13,24 @@ import org.eclipse.microprofile.jwt.JsonWebToken;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 /**
  * Die Stufen 1 bis 4 als je ein Endpunkt.
  *
  * Der Aufbau ist Absicht: Jeder Endpunkt zeigt genau einen Schritt, und der
  * Unterschied zum vorigen ist eine Zeile oder eine Annotation.
+ *
+ * Bezeichner sind englisch, Kommentare deutsch - Endpunktpfade und
+ * JSON-Felder liest jedes Schuelerprojekt, die Erklaerungen nur wer hier
+ * hereinschaut.
  */
 @Path("/api")
 @Produces(MediaType.APPLICATION_JSON)
 public class DemoResource {
 
     /** Praefix, an dem eine Klassengruppe erkennbar ist. Siehe D33. */
-    private static final String KLASSEN_DACH = "/klassen/";
+    private static final String CLASSES_PREFIX = "/classes/";
 
     @Inject
     JsonWebToken jwt;
@@ -35,16 +40,16 @@ public class DemoResource {
 
     // -------------------------------------------------------------------------
     // Stufe 1/2 - ohne Anmeldung erreichbar.
-    // Dient als Gegenprobe: Wer hier 200 bekommt und bei /geschuetzt 401,
-    // hat einen laufenden Server und ein fehlendes Token - nicht umgekehrt.
+    // Dient als Gegenprobe: Wer hier 200 bekommt und bei /protected 401, hat
+    // einen laufenden Server und ein fehlendes Token - nicht umgekehrt.
     // -------------------------------------------------------------------------
     @GET
-    @Path("/oeffentlich")
-    public Map<String, Object> oeffentlich() {
+    @Path("/public")
+    public Map<String, Object> publicEndpoint() {
         return Map.of(
-                "nachricht", "Dieser Endpunkt braucht kein Token.",
-                "hinweis", "Wenn dieser Aufruf gelingt und /api/geschuetzt mit 401 "
-                         + "antwortet, funktioniert der Server und es fehlt das Token.");
+                "message", "Dieser Endpunkt braucht kein Token.",
+                "hint", "Wenn dieser Aufruf gelingt und /api/protected mit 401 "
+                      + "antwortet, funktioniert der Server und es fehlt das Token.");
     }
 
     // -------------------------------------------------------------------------
@@ -56,58 +61,58 @@ public class DemoResource {
     // nachbaut, macht genau die Fehler, gegen die diese Demo argumentiert.
     // -------------------------------------------------------------------------
     @GET
-    @Path("/geschuetzt")
+    @Path("/protected")
     @Authenticated
-    public Map<String, Object> geschuetzt() {
+    public Map<String, Object> protectedEndpoint() {
         return Map.of(
-                "angemeldetAls", jwt.getName(),
-                "aussteller", jwt.getIssuer(),
-                "zielgruppe", jwt.getAudience(),
+                "username", jwt.getName(),
+                "issuer", jwt.getIssuer(),
+                "audience", jwt.getAudience(),
                 // azp = authorized party: WELCHE Anwendung hat das Token geholt.
                 // aud sagt, fuer wen es gedacht ist; azp, wer es besorgt hat.
-                // Bei einem gestohlenen Token aus einem anderen Projekt weicht
-                // azp ab, auch wenn aud passt.
-                "ausgestelltFuer", jwt.getClaim("azp"),
-                "laeuftAbUm", jwt.getExpirationTime(),
-                "rollen", identity.getRoles(),
-                "gruppen", gruppen());
+                // Bei einem Token aus einem anderen Projekt weicht azp ab,
+                // auch wenn aud passt.
+                "authorizedParty", jwt.getClaim("azp"),
+                "expiresAt", jwt.getExpirationTime(),
+                "roles", identity.getRoles(),
+                "groups", groups());
     }
 
     // -------------------------------------------------------------------------
     // Stufe 4a - Autorisierung ueber die Klassengruppe.
     //
-    // Die Klasse steht im Token, weil der Client Scope "klassen" sie als
+    // Die Klasse steht im Token, weil der Client Scope "classes" sie als
     // groups-Claim mitgibt (Task 7.8). Kein Abruf beim Server noetig - das ist
     // der Punkt: Wer die angemeldete Person autorisieren will, braucht keine
     // Benutzerliste und damit kein Dienstkonto.
     // -------------------------------------------------------------------------
     @GET
-    @Path("/meine-klasse")
+    @Path("/my-class")
     @Authenticated
-    public Map<String, Object> meineKlasse() {
-        List<String> klassen = gruppen().stream()
-                .filter(g -> g.startsWith(KLASSEN_DACH))
+    public Map<String, Object> myClass() {
+        List<String> classes = groups().stream()
+                .filter(g -> g.startsWith(CLASSES_PREFIX))
                 .toList();
 
-        if (klassen.isEmpty()) {
+        if (classes.isEmpty()) {
             // KEIN Fehler. Das ist normativ so verlangt: Zwischen Import und
             // naechstem Gruppenabgleich hat eine Person keine Klasse, und
-            // lokale Konten haben nie eine. Eine Anwendung, die hier abbricht,
-            // faellt am ersten Schultag um.
+            // lokale Konten sowie Lehrkraefte haben nie eine. Eine Anwendung,
+            // die hier abbricht, faellt am ersten Schultag um.
             return Map.of(
-                    "klasse", "",
-                    "hinweis", "Dieses Konto gehoert keiner Klassengruppe an. "
-                             + "Das ist ein gueltiger Zustand: lokale Konten und "
-                             + "Lehrkraefte haben keine, neu importierte noch nicht.");
+                    "class", "",
+                    "hint", "Dieses Konto gehoert keiner Klassengruppe an. Das ist "
+                          + "ein gueltiger Zustand: lokale Konten und Lehrkraefte "
+                          + "haben keine, neu importierte noch nicht.");
         }
 
-        // Der volle Pfad ist /klassen/<ABTEILUNG>/<KLASSE>.
-        String[] teile = klassen.get(0).substring(KLASSEN_DACH.length()).split("/");
+        // Der volle Pfad ist /classes/<DEPARTMENT>/<CLASS>.
+        String[] parts = classes.get(0).substring(CLASSES_PREFIX.length()).split("/");
         return Map.of(
-                "abteilung", teile.length > 0 ? teile[0] : "",
-                "klasse", teile.length > 1 ? teile[1] : "",
-                "vollerPfad", klassen.get(0),
-                "alleKlassen", klassen);
+                "department", parts.length > 0 ? parts[0] : "",
+                "class", parts.length > 1 ? parts[1] : "",
+                "fullPath", classes.get(0),
+                "allClasses", classes);
     }
 
     // -------------------------------------------------------------------------
@@ -117,25 +122,25 @@ public class DemoResource {
     // gueltig, es reicht nur nicht. Der Unterschied ist der halbe Lehrinhalt.
     // -------------------------------------------------------------------------
     @GET
-    @Path("/nur-lehrer")
-    @RolesAllowed("lehrer")
-    public Map<String, Object> nurLehrer() {
+    @Path("/teachers-only")
+    @RolesAllowed("teacher")
+    public Map<String, Object> teachersOnly() {
         return Map.of(
-                "nachricht", "Diesen Endpunkt sieht nur, wer die Rolle 'lehrer' hat.",
-                "angemeldetAls", jwt.getName());
+                "message", "Diesen Endpunkt sieht nur, wer die Rolle 'teacher' hat.",
+                "username", jwt.getName());
     }
 
     /** Der groups-Claim, robust gegen "gar nicht vorhanden". */
-    private List<String> gruppen() {
-        Object roh = jwt.getClaim("groups");
-        if (roh == null) {
+    private List<String> groups() {
+        Object raw = jwt.getClaim("groups");
+        if (raw == null) {
             return List.of();
         }
-        if (roh instanceof Iterable<?> it) {
-            return java.util.stream.StreamSupport.stream(it.spliterator(), false)
+        if (raw instanceof Iterable<?> it) {
+            return StreamSupport.stream(it.spliterator(), false)
                     .map(Object::toString)
                     .collect(Collectors.toList());
         }
-        return List.of(roh.toString());
+        return List.of(raw.toString());
     }
 }

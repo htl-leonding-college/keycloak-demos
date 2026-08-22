@@ -52,11 +52,11 @@ vergleicht sie als Text — ein anderer Port ergibt `Invalid parameter: redirect
 
 |3
 |Geschützter Endpunkt, Token wird serverseitig geprüft
-|`/api/geschuetzt`
+|`/api/protected`
 
 |4
 |Autorisierung über Klassengruppe und über Rolle
-|`/api/meine-klasse`, `/api/nur-lehrer`
+|`/api/my-class`, `/api/teachers-only`
 
 |5
 |Benutzerliste einer Klasse — *noch nicht enthalten*
@@ -101,21 +101,21 @@ Was *geprüft* ist (2026-08-22, gegen den laufenden Server):
 
 [source,text]
 ----
-/api/oeffentlich          ohne Token           200
-/api/geschuetzt           ohne Token           401
-/api/geschuetzt           mit Unsinn-Token     401
-/api/meine-klasse         ohne Token           401
-/api/nur-lehrer           ohne Token           401
+/api/public          ohne Token           200
+/api/protected           ohne Token           401
+/api/protected           mit Unsinn-Token     401
+/api/my-class         ohne Token           401
+/api/teachers-only           ohne Token           401
 CORS-Vorabfrage von http://localhost:8000      200, allow-origin gesetzt
 OIDC-Discovery + JWKS von auth-dev             gelingt
 ----
 
 Was *noch nicht* geht, und warum:
 
-* *`/api/meine-klasse` liefert „keine Klassengruppe"* — solange der Client Scope
-  `klassen` nicht im Realm eingetragen ist. Er ist gebaut (Change 2, Task 7.8),
+* *`/api/my-class` liefert „keine Klassengruppe"* — solange der Client Scope
+  `classes` nicht im Realm eingetragen ist. Er ist gebaut (Change 2, Task 7.8),
   aber noch nicht ausgerollt (Task 7.11).
-* *`/api/nur-lehrer` liefert 403* — die Realm-Rolle `lehrer` existiert noch nicht
+* *`/api/teachers-only` liefert 403* — die Realm-Rolle `teacher` existiert noch nicht
   und ist niemandem zugewiesen.
 * *Der Anmeldevorgang selbst ist nicht durchgespielt.* Er braucht einen Browser
   und ein echtes Schulkonto.
