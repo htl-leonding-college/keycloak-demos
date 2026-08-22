@@ -40,6 +40,19 @@ public interface KeycloakAdminApi {
                                @QueryParam("max") int max,
                                @QueryParam("briefRepresentation") boolean brief);
 
+    /**
+     * Eine einzelne Gruppe. Gebraucht wird daraus nur der Pfad - und zwar,
+     * weil der Aufrufer die Gruppe ueber ihre ID nennt, die Berechtigung aber
+     * am Pfad haengt (/classes/IF/5BHIF steht so im Token).
+     *
+     * Den Pfad vom Frontend mitschicken zu lassen waere der naheliegende
+     * Weg und der falsche: Der Aufrufer duerfte sich dann seine eigene
+     * Berechtigung ausstellen.
+     */
+    @GET
+    @Path("groups/{id}")
+    Group group(@PathParam("id") String id);
+
     /** Die direkten Untergruppen einer Gruppe. */
     @GET
     @Path("groups/{id}/children")

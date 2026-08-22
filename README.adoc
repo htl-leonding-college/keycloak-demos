@@ -70,7 +70,7 @@ vergleicht sie als Text — ein anderer Port ergibt `Invalid parameter: redirect
 |`/api/my-class`, `/api/teachers-only`
 
 |5
-|Gruppen auflisten, Mitglieder einer Gruppe anzeigen — über ein *Dienstkonto*
+|Gruppen auflisten, Mitglieder anzeigen — *Dienstkonto* plus Bezugsprüfung
 |`/api/groups`, `/api/groups/{id}/members`
 |===
 
@@ -121,6 +121,33 @@ antwortet dann mit `403`, obwohl die Rolle im Token steht.
 
 Tückisch daran ist die Zeitfolge: Vor der Einführung der Klassengruppen hätte
 derselbe Code funktioniert.
+
+=== Rollenprüfung reicht nicht — die meisten Fragen sind Bezugsfragen
+
+Stufe 4 fragt „welche Rolle hat diese Person". Stufe 5 fragt „darf diese Person
+*diesen* Datensatz sehen" — und die Antwort hängt an beidem, am Aufrufer und am
+angefragten Objekt.
+
+[cols="1,2",options="header"]
+|===
+|Aufrufer |`/api/groups/<id>/members`
+
+|Lehrkraft (Rolle `teacher`)
+|jede Gruppe
+
+|alle anderen
+|nur Gruppen, in denen sie selbst Mitglied sind — also die eigene Klasse
+
+|lokales Konto ohne `groups`
+|keine Gruppe. Kein Fehler, kein Sonderfall
+|===
+
+IMPORTANT: Der Gruppenpfad für den Vergleich kommt vom *Server*
+(`GET /groups/{id}`), nicht aus der Anfrage. Wer den Pfad mitschicken darf,
+stellt sich seine Berechtigung selbst aus. Der Aufrufer nennt nur die ID.
+
+Verglichen wird gegen den `groups`-Claim des Tokens — er ist signiert. Ein
+zweiter Aufruf beim Server ergäbe denselben Wert, nur langsamer.
 
 === Stufe 5 ist die einzige Stufe mit einem Geheimnis
 

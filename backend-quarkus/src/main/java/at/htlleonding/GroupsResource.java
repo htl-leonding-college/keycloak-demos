@@ -1,7 +1,10 @@
 package at.htlleonding;
 
+import io.quarkus.security.Authenticated;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -45,6 +48,12 @@ public class GroupsResource {
     @RestClient
     KeycloakAdminApi admin;
 
+    @Inject
+    JsonWebToken jwt;
+
+    @Inject
+    SecurityIdentity identity;
+
     /**
      * Alle Gruppen als flache Liste, nach Pfad sortiert.
      *
@@ -52,7 +61,7 @@ public class GroupsResource {
      * Pfad die Hierarchie ohnehin traegt: /classes/IF/5BHIF.
      */
     @GET
-    @RolesAllowed("teacher")
+    @Authenticated
     public Response groups() {
         try {
             List<Map<String, Object>> flach = new ArrayList<>();
@@ -66,12 +75,29 @@ public class GroupsResource {
         }
     }
 
-    /** Die Mitglieder einer Gruppe, ueber alle Seiten hinweg. */
+    /**
+     * Die Mitglieder einer Gruppe, ueber alle Seiten hinweg.
+     *
+     * HIER ENDET DIE ROLLENPRUEFUNG UND BEGINNT DIE BEZUGSPRUEFUNG.
+     *
+     * Stufe 4 fragt "welche Rolle hat diese Person" - eine Eigenschaft der
+     * Person allein. Das reicht fuer /api/teachers-only und fuer sonst wenig:
+     * Die meisten Fragen einer Anwendung lauten nicht "darf diese Person
+     * ueberhaupt", sondern "darf diese Person DAS HIER". Die Antwort haengt
+     * dann an beidem - am Aufrufer und am angefragten Datensatz.
+     *
+     * Konkret: Eine Lehrkraft sieht jede Gruppe. Alle anderen sehen genau die
+     * Gruppen, in denen sie selbst Mitglied sind - ihre eigene Klasse.
+     */
     @GET
     @Path("/{id}/members")
-    @RolesAllowed("teacher")
+    @Authenticated
     public Response members(@PathParam("id") String id) {
         try {
+            Response verweigert = pruefeZugriff(id);
+            if (verweigert != null) {
+                return verweigert;
+            }
             List<User> alle = new ArrayList<>();
             int first = 0;
             List<User> seite;
@@ -97,6 +123,51 @@ public class GroupsResource {
         } catch (ClientWebApplicationException e) {
             return fehler(e);
         }
+    }
+
+    /**
+     * Darf der Aufrufer die Mitglieder dieser Gruppe sehen?
+     *
+     * @return {@code null}, wenn ja - sonst die fertige Ablehnung.
+     */
+    private Response pruefeZugriff(String gruppenId) {
+        // Zweig 1 - Rollenpruefung. Eine Lehrkraft sieht jede Gruppe.
+        if (identity.hasRole("teacher")) {
+            return null;
+        }
+
+        // Zweig 2 - Bezugspruefung. Der Pfad kommt vom SERVER, nicht aus der
+        // Anfrage: Wer den Pfad mitschicken darf, stellt sich seine
+        // Berechtigung selbst aus. Der Aufrufer nennt nur die ID.
+        String pfad = admin.group(gruppenId).path();
+
+        // Verglichen wird gegen den groups-Claim des TOKENS. Er ist signiert;
+        // ein zweiter Aufruf beim Server waere derselbe Wert, nur langsamer.
+        boolean mitglied = eigeneGruppen().contains(pfad);
+        if (mitglied) {
+            return null;
+        }
+
+        return Response.status(Response.Status.FORBIDDEN)
+                .entity(Map.of(
+                        "error", "Kein Zugriff auf " + pfad,
+                        "hint", "Ohne die Rolle 'teacher' sind nur die Gruppen sichtbar, "
+                              + "in denen du selbst Mitglied bist. Deine: "
+                              + String.join(", ", eigeneGruppen())))
+                .build();
+    }
+
+    /** Die Gruppenpfade aus dem Token, robust gegen "gar nicht vorhanden". */
+    private List<String> eigeneGruppen() {
+        Object raw = jwt.getClaim("groups");
+        if (raw instanceof Iterable<?> it) {
+            List<String> pfade = new ArrayList<>();
+            it.forEach(g -> pfade.add(g.toString()));
+            return pfade;
+        }
+        // Lokale Konten und frisch importierte haben keinen groups-Claim. Sie
+        // sehen damit keine Gruppe - richtig, und kein Grund abzubrechen.
+        return List.of();
     }
 
     /**

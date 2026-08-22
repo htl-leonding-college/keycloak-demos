@@ -50,6 +50,11 @@
   <p>Die erste Stufe, die ein <em>Dienstkonto</em> braucht: Hier geht es um Personen, die
      gerade <strong>nicht</strong> angemeldet sind. Klasse und Rolle der angemeldeten
      Person stehen im Token — dafür ist kein einziger Aufruf nötig.</p>
+  <p><small><strong>Wer was sieht:</strong> Lehrkräfte jede Gruppe, alle anderen nur die
+     Gruppen, in denen sie selbst Mitglied sind. Eine fremde Klasse auszuwählen ist
+     ausdrücklich erlaubt — die Antwort ist dann <code>403</code> und nennt den Grund.
+     Das ist der Unterschied zwischen „welche Rolle hat jemand“ und „welchen Bezug hat
+     jemand zu diesem Datensatz“.</small></p>
   <div class="zeile">
     <button id="gruppen-laden" class="secondary">Gruppen laden</button>
     <select id="gruppe" disabled><option>— noch nicht geladen —</option></select>
