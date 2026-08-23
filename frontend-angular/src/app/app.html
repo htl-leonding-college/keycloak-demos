@@ -1,0 +1,46 @@
+<main>
+
+<h1>Keycloak-Demo · Angular</h1>
+<p>Dieselben Stufen 1 bis 3 wie im Frontend ohne Framework, hier mit
+   <code>angular-auth-oidc-client</code>. Derselbe Client
+   <code>demo-frontend</code>, derselbe Realm, dasselbe Backend.
+   Stufe 4 und 5 stehen im Vanilla-Frontend — sie zeigen Autorisierung, und
+   die entscheidet das Backend, nicht das Framework.</p>
+
+<article>
+  <header><strong>Stufe 1 — Anmelden</strong></header>
+  <p><strong>Status:</strong>
+     {{ angemeldet().isAuthenticated ? 'angemeldet' : 'nicht angemeldet' }}</p>
+  <div class="zeile">
+    <button (click)="anmelden()" [disabled]="angemeldet().isAuthenticated">Anmelden</button>
+    <button class="secondary" (click)="abmelden()"
+            [disabled]="!angemeldet().isAuthenticated">Abmelden</button>
+  </div>
+  <p><small>Der Umweg über <code>auth-dev.htl-leonding.ac.at</code> ist der Punkt:
+     Diese Anwendung sieht das Kennwort nie. Sie bekommt am Ende ein Token und
+     sonst nichts.</small></p>
+</article>
+
+<article>
+  <header><strong>Stufe 2 — was im Token steht</strong></header>
+  <p>Der Mittelteil eines JWT ist Base64, nicht Verschlüsselung — jeder, der das
+     Token hat, kann ihn lesen. Deshalb steht dort nichts Geheimes, und deshalb
+     ist die <em>Signatur</em> das, was zählt. Prüfen kann sie nur, wer den
+     öffentlichen Schlüssel des Realms holt: das Backend.</p>
+  <pre>{{ claims() }}</pre>
+</article>
+
+<article>
+  <header><strong>Stufe 3 — Aufrufe ans Backend</strong></header>
+  <div class="zeile">
+    <button class="secondary" (click)="rufen('/api/public')">öffentlich</button>
+    <button class="secondary" (click)="rufen('/api/protected')">geschützt</button>
+  </div>
+  <pre>{{ antwort() }}</pre>
+  <p><small>Ohne Anmeldung antwortet <code>/api/protected</code> mit
+     <code>401</code>. Das Token hängt der Interceptor an — aber nur an
+     Adressen aus <code>secureRoutes</code>. Ein Token, das an jeden Host
+     mitgeht, den die App aufruft, ist ein Token, das abfließt.</small></p>
+</article>
+
+</main>

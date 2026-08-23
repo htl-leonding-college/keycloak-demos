@@ -1,0 +1,7 @@
+pre {
+  background: var(--pico-code-background-color);
+  padding: 1rem;
+  overflow-x: auto;
+  font-size: .8rem;
+}
+.zeile { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }

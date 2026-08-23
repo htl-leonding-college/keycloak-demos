@@ -26,8 +26,11 @@ Schulkonten an — keine Attrappe, kein lokaler Keycloak.
 # Fenster 1 — Backend
 cd backend-quarkus && ./mvnw quarkus:dev
 
-# Fenster 2 — Frontend
+# Fenster 2 — Frontend ohne Framework (Stufen 1–5)
 cd frontend-vanilla && python3 -m http.server 8000
+
+# oder: Angular-Frontend (Stufen 1–3)
+cd frontend-angular && npm install && npm start
 ----
 
 Dann `http://localhost:8000` öffnen und auf *Anmelden* klicken.
@@ -55,15 +58,15 @@ vergleicht sie als Text — ein anderer Port ergibt `Invalid parameter: redirect
 
 |1
 |Anmelden und abmelden, Authorization Code Flow mit PKCE
-|`frontend-vanilla/index.html`
+|`frontend-vanilla/index.html`, `frontend-angular/`
 
 |2
 |Was im Token steht — und dass es jeder lesen kann
-|dieselbe Datei, Anzeige „Claims"
+|dieselbe Datei, Anzeige „Claims"; auch im Angular-Frontend
 
 |3
 |Geschützter Endpunkt, Token wird serverseitig geprüft
-|`/api/protected`
+|`/api/protected`, in beiden Frontends
 
 |4
 |Autorisierung über Klassengruppe und über Rolle
@@ -169,6 +172,46 @@ NOTE: Das `refresh_token` ist kein Client-Geheimnis. Der Tausch geht ohne
 `client_secret` — der Client ist öffentlich, und die Bindung stellt Keycloak über
 `client_id` her.
 
+=== Was die Bibliothek abnimmt — und was sie nicht abnimmt
+
+Das Angular-Frontend macht dieselben drei Stufen wie das Vanilla-Frontend, nur
+mit `angular-auth-oidc-client`. Der Vergleich ist der eigentliche Zweck:
+
+[cols="2,3,3",options="header"]
+|===
+|Schritt |ohne Framework |mit Bibliothek
+
+|PKCE
+|rund dreißig Zeilen Web Crypto
+|`responseType: 'code'` — den Rest macht sie
+
+|Rückkehr vom Anmeldeserver
+|Code aus der Adresszeile lesen, `state` prüfen, tauschen
+|`checkAuth()` beim Start
+
+|Erneuerung
+|dreißig Zeilen mit Vorlauf und geteiltem Tausch
+|`silentRenew`, `useRefreshToken`, `renewTimeBeforeTokenExpiresInSeconds`
+
+|Token an Aufrufe hängen
+|von Hand je `fetch`
+|`authInterceptor()` plus `secureRoutes`
+|===
+
+Was sie *nicht* abnimmt, und das ist die Zeile, die hängen bleiben soll:
+
+* Der *Server* prüft Weiterleitungsziel, PKCE und Zielgruppe. Die Client
+  Policies des Realms lehnen impliziten Ablauf und `plain` ab — unabhängig
+  davon, was der Client schickt.
+* Das *Backend* prüft die Signatur und `aud`. Ein Frontend kann sich keine
+  Berechtigung ausstellen, egal welche Bibliothek es benutzt.
+* `secureRoutes` ist eine Sicherheitsentscheidung, keine Bequemlichkeit: Ohne
+  diese Liste hinge der Interceptor das Token an *jeden* Aufruf, den die App
+  macht — auch an fremde Hosts.
+
+Anders gesagt: Die Bibliothek nimmt Arbeit ab, keine Verantwortung. Wer beide
+Frontends nebeneinander laufen lässt, sieht dieselben Statuscodes.
+
 === Stufe 5 ist die einzige Stufe mit einem Geheimnis
 
 Klasse und Rolle der *angemeldeten* Person stehen im Token — dafür ist kein
@@ -204,7 +247,13 @@ Was *noch nicht* geprüft ist:
 * *Die Bezugsprüfung aus der Sicht einer Schülerin* — dass eine fremde Klasse
   `403` liefert und die eigene `200`. Bisher nur aus Lehrkraft-Sicht gesehen,
   und die kommt am ersten Zweig vorbei.
-* *Das Angular-Frontend* ist nicht gebaut.
+* *Das Angular-Frontend im Browser.* Gebaut (2026-08-23, Angular 22.1.3,
+  `angular-auth-oidc-client` 22.0.0); `ng build` läuft durch und der
+  Entwicklungsserver antwortet auf `4200`. Eine *Anmeldung* ist damit nicht
+  belegt — dass ein Bündel übersetzt, sagt nichts über den Ablauf. Zu messen
+  sind dieselben drei Zeilen wie beim Vanilla-Frontend: Anmelden, Claims
+  sichtbar, `/api/public` `200` und `/api/protected` `401` vor der Anmeldung
+  bzw. `200` danach.
 
 Das Token läuft nach *fünf Minuten* ab (`accessTokenLifespan=300`). Das Frontend
 erneuert es seit dem 2026-08-23 selbst — die Statuszeile zeigt die Restlaufzeit
@@ -218,9 +267,17 @@ anmelden, und die Demo sagt das auch.
 ----
 backend-quarkus/    Quarkus 3.38.3, Java 25 — prüft Tokens; meldet sich nur für
                     Stufe 5 selbst an, und dann als Dienstkonto
-frontend-vanilla/   eine HTML-Datei, kein Build, PKCE von Hand
+frontend-vanilla/   eine HTML-Datei, kein Build, PKCE von Hand — Stufen 1–5
+frontend-angular/   Angular 22 + angular-auth-oidc-client 22 — Stufen 1–3
 ----
 
-Ein Angular-Frontend mit `angular-auth-oidc-client` ist vorgesehen und noch nicht
-gebaut. Beide Frontends benutzen dasselbe Backend — das ist der Grund, warum die
-Demos in *einem* Repository liegen und nicht in dreien.
+Beide Frontends benutzen dasselbe Backend und denselben Client `demo-frontend` —
+das ist der Grund, warum die Demos in *einem* Repository liegen und nicht in
+dreien. Ein Client hat eine *Liste* von Weiterleitungszielen; `8000`, `4200` und
+`5173` stehen alle drei darin. Ein eigener Client je Frontend wäre eine falsche
+Grenze: Getrennt werden *Projekte*, nicht zwei Oberflächen desselben Projekts.
+
+CAUTION: Das Angular-CLI verlangt Node `>= 22.22.3`, `>= 24.15` oder `>= 26`.
+`frontend-angular/.nvmrc` nennt 24 — mit nvm genügt `nvm install 24 && nvm use`.
+Auf einem älteren Node bricht schon `npm start` ab, mit einer Meldung über die
+Node-Version und nicht über Angular.
